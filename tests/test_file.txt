@@ -1,0 +1,321 @@
+-- lua/search-replace/init.lua
+local Layout = require("search-replace.ui.layout")
+local Inputs = require("search-replace.ui.inputs")
+local Results = require("search-replace.ui.results")
+local Builder = require("search-replace.core.builder")
+local Parser = require("search-replace.core.parser")
+local State = require("search-replace.core.state")
+local Grouper = require("search-replace.core.grouper")
+local Diff = require("search-replace.core.diff")
+local Popup = require("nui.popup")
+local Job = require("plenary.job")
+
+local M = {}
+
+function M.setup(opts)
+  vim.keymap.set("n", "<leader>sr", M.open, { desc = "Search and Replace" })
+end
+
+function M.open()
+  State.reset() -- Reset state on open
+
+  local inputs = Inputs.create_inputs()
+  local results = Results.create_results()
+  local preview = Popup({
+    enter = false,
+    focusable = true,  -- Changed to true for Tab navigation
+    border = {
+      style = "rounded",
+      text = {
+        top = " Preview ",
+        top_align = "center",
+      },
+    },
+    win_options = {
+      winhighlight = "Normal:Normal,FloatBorder:FloatBorder",
+    },
+  })
+
+  local components = {
+    search = inputs.search,
+    replace = inputs.replace,
+    flags = inputs.flags,
+    results = results,
+    preview = preview,
+  }
+
+  local layout = Layout.create_layout(components)
+  layout:mount()
+
+  -- Store grouped data for preview access (initialize early)
+  local grouped_files = {}
+  -- Track file selection state (by file path)
+  local file_selection = {}
+  
+  -- Placeholder text config
+  local placeholders = {
+    { component = inputs.search, text = "Enter search pattern..." },
+    { component = inputs.replace, text = "Leave empty for search only..." },
+    { component = inputs.flags, text = "*.lua, lua/, !tests/" },
+  }
+  
+  -- Placeholder namespace
+  local placeholder_ns = vim.api.nvim_create_namespace("search_replace_placeholder")
+  
+  -- Function to create placeholder display
+  local function create_placeholder(component, placeholder_text)
+    if not component.bufnr then return end
+    
+    vim.api.nvim_buf_clear_namespace(component.bufnr, placeholder_ns, 0, -1)
+    
+    local lines = vim.api.nvim_buf_get_lines(component.bufnr, 0, 1, false)
+    local content = lines[1] or ""
+    -- Remove prompt "> " from content check
+    content = content:gsub("^> ", "")
+    
+    if content == "" then
+      vim.api.nvim_buf_set_extmark(component.bufnr, placeholder_ns, 0, 2, {
+        virt_text = { { placeholder_text, "Comment" } },
+        virt_text_pos = "overlay",
+      })
+    end
+  end
+  
+  -- Setup placeholders for all inputs
+  vim.schedule(function()
+    for _, p in ipairs(placeholders) do
+      create_placeholder(p.component, p.text)
+      
+      -- Update placeholder when buffer changes
+      vim.api.nvim_buf_attach(p.component.bufnr, false, {
+        on_lines = function()
+          vim.schedule(function()
+            create_placeholder(p.component, p.text)
+          end)
+          return false
+        end,
+      })
+    end
+  end)
+
+  -- Helper to create preview - shows all matches for selected file
+  local function create_preview()
+    local line_idx = vim.api.nvim_win_get_cursor(results.winid)[1]
+    
+    -- Get the file at this line
+    if line_idx > #grouped_files then
+      vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, {})
+      return
+    end
+    
+    local file_group = grouped_files[line_idx]
+    if not file_group then
+      vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, {})
+      return
+    end
+
+    -- Get search and replace patterns
+    local search_pat = ""
+    if inputs.search.bufnr then
+      local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
+      if #lines > 0 then search_pat = lines[1]:gsub("^> %s*", "") end
+    end
+    
+    local replace_pat = ""
+    if inputs.replace.bufnr then
+      local lines = vim.api.nvim_buf_get_lines(inputs.replace.bufnr, 0, 1, false)
+      if #lines > 0 then replace_pat = lines[1]:gsub("^> %s*", "") end
+    end
+
+    -- Read file content
+    local file_path = file_group.file
+    local file_lines = {}
+    if vim.fn.filereadable(file_path) == 1 then
+      file_lines = vim.fn.readfile(file_path)
+    end
+
+    local preview_lines = {}
+    table.insert(preview_lines, "File: " .. file_path)
+    table.insert(preview_lines, "Matches: " .. #file_group.matches)
+    table.insert(preview_lines, "")
+    
+    -- Show all matches for this file
+    for i, match in ipairs(file_group.matches) do
+      local line_num = match.line_number
+      local original_line = file_lines[line_num] or ""
+      
+      table.insert(preview_lines, "--- Match " .. i .. " @ Line " .. line_num .. " ---")
+      
+      -- If no replacement pattern, just show context
+      if replace_pat == "" then
+        -- Show 2 lines of context before and after
+        local start_line = math.max(1, line_num - 2)
+        local end_line = math.min(#file_lines, line_num + 2)
+        
+        for j = start_line, end_line do
+          local prefix = j == line_num and ">>> " or "    "
+          table.insert(preview_lines, prefix .. file_lines[j])
+        end
+      else
+        -- Show diff for replacement
+        local ok, new_line = pcall(string.gsub, original_line, search_pat, replace_pat)
+        if not ok then new_line = original_line end
+        
+        table.insert(preview_lines, "- " .. original_line)
+        table.insert(preview_lines, "+ " .. new_line)
+      end
+      
+      table.insert(preview_lines, "")
+    end
+    
+    vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, preview_lines)
+  end
+  
+  -- Helper to get view items (files only)
+  local function get_view_items()
+    local items = State.get_results()
+    -- Group by file
+    grouped_files = Grouper.group_by_file(items)
+    
+    local view_items = {}
+    for _, file_group in ipairs(grouped_files) do
+      -- Default to selected (true) if not explicitly set
+      local is_selected = file_selection[file_group.file]
+      if is_selected == nil then
+        is_selected = true  -- Default: all files selected
+      end
+      
+      table.insert(view_items, {
+        file = file_group.file,
+        match_count = file_group.match_count,
+        selected = is_selected,
+      })
+    end
+    return view_items
+  end
+
+  -- Search Logic
+  local function run_search()
+    local query = ""
+    if inputs.search.bufnr then
+      local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
+      if #lines > 0 then
+        query = lines[1]:gsub("^> %s*", "")
+      end
+    end
+    
+    local flags = ""
+    if inputs.flags.bufnr then
+      local lines = vim.api.nvim_buf_get_lines(inputs.flags.bufnr, 0, 1, false)
+      if #lines > 0 then
+        flags = lines[1]:gsub("^> %s*", "")
+      end
+    end
+    
+    if query == "" then return end
+
+    local cmd_args = Builder.build_args({ search = query, flags = flags })
+    local cmd = string.format("cd %s && rg %s", 
+      vim.fn.shellescape(vim.fn.getcwd()),
+      table.concat(vim.tbl_map(vim.fn.shellescape, cmd_args), " "))
+    
+    local output = vim.fn.systemlist(cmd)
+    local exit_code = vim.v.shell_error
+    
+    if exit_code == 0 then
+      local items = {}
+      for _, line in ipairs(output) do
+        local parsed = Parser.parse_line(line)
+        if parsed then
+          table.insert(items, parsed)
+        end
+      end
+      
+      State.set_results(items)
+      Results.create_results(results, get_view_items())
+      
+      if #items > 0 then
+        vim.api.nvim_win_set_cursor(results.winid, {1, 0})
+        create_preview()
+      end
+    else
+      State.set_results({})
+      Results.create_results(results, {})
+      vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, { "No results found" })
+    end
+  end
+
+  -- Event Wiring
+  inputs.search:map("i", "<CR>", function()
+    run_search()
+  end)
+  
+  inputs.replace:map("i", "<CR>", function()
+    -- If there are results, just create preview
+    if #State.get_results() > 0 then
+      create_preview()
+    else
+      -- Otherwise trigger search
+      run_search()
+    end
+  end)
+  
+  inputs.flags:map("i", "<CR>", function()
+    -- Trigger search with new flags
+    run_search()
+  end)
+  local function focus_component(component)
+    if component and component.winid and vim.api.nvim_win_is_valid(component.winid) then
+      vim.api.nvim_set_current_win(component.winid)
+    end
+  end
+
+  -- Tab navigation: Search -> Replace -> Flags -> Results -> Preview -> (back to Search)
+  inputs.search:map("i", "<Tab>", function() focus_component(inputs.replace) end)
+  inputs.replace:map("i", "<Tab>", function() focus_component(inputs.flags) end)
+  inputs.flags:map("i", "<Tab>", function() focus_component(results) end)
+  results:map("n", "<Tab>", function() focus_component(preview) end)
+  preview:map("n", "<Tab>", function() focus_component(inputs.search) end)
+  
+  -- Results navigation
+  results:on("CursorMoved", function()
+    create_preview()
+  end)
+  
+  -- Toggle file selection with Space
+  results:map("n", "<Space>", function()
+    local line_idx = vim.api.nvim_win_get_cursor(results.winid)[1]
+    if line_idx > #grouped_files then return end -- Skip if empty/placeholder
+    
+    local file_group = grouped_files[line_idx]
+    if not file_group then return end
+    
+    -- Toggle selection for this file
+    local current = file_selection[file_group.file]
+    if current == nil then
+      current = true  -- Default was selected
+    end
+    file_selection[file_group.file] = not current
+    
+    Results.create_results(results, get_view_items())
+    -- Restore cursor
+    vim.api.nvim_win_set_cursor(results.winid, {line_idx, 0})
+  end)
+  
+  -- Toggle selection
+  local function close()
+    layout:unmount()
+  end
+  
+  inputs.search:map("n", "<Esc>", close)
+  inputs.search:map("i", "<Esc>", close)
+  results:map("n", "<Esc>", close)
+  results:map("n", "q", close)
+  
+  -- Initial focus
+  vim.schedule(function()
+    focus_component(inputs.search)
+  end)
+end
+
+return M

@@ -1,0 +1,133 @@
+*search-replace.txt*  Project-wide search and replace for Neovim
+
+Author:  Jason-Bai
+License: MIT
+
+==============================================================================
+CONTENTS                                              *search-replace-contents*
+
+    1. Introduction ............................ |search-replace-introduction|
+    2. Requirements ............................ |search-replace-requirements|
+    3. Installation ............................ |search-replace-installation|
+    4. Configuration ........................... |search-replace-configuration|
+    5. Usage ................................... |search-replace-usage|
+    6. Keybindings ............................. |search-replace-keybindings|
+    7. Health Check ............................ |search-replace-health|
+
+==============================================================================
+1. Introduction                                   *search-replace-introduction*
+
+search-replace.nvim is a powerful search and replace plugin for Neovim using
+ripgrep for fast project-wide search operations.
+
+Features:
+- Fast search powered by ripgrep
+- Live preview with context and diff view
+- Results grouped by file
+- Selective file replacement
+- Glob pattern filtering
+- Full keyboard navigation
+- Undo support for replacements
+
+==============================================================================
+2. Requirements                                   *search-replace-requirements*
+
+- Neovim >= 0.8
+- ripgrep (https://github.com/BurntSushi/ripgrep)
+- nui.nvim (https://github.com/MunifTanjim/nui.nvim)
+- plenary.nvim (https://github.com/nvim-lua/plenary.nvim)
+
+==============================================================================
+3. Installation                                   *search-replace-installation*
+
+Using lazy.nvim: >lua
+    {
+      "Jason-Bai/search-replace.nvim",
+      dependencies = {
+        "MunifTanjim/nui.nvim",
+        "nvim-lua/plenary.nvim",
+      },
+      config = function()
+        require("search-replace").setup()
+      end,
+    }
+<
+
+==============================================================================
+4. Configuration                                 *search-replace-configuration*
+
+Default configuration: >lua
+    require("search-replace").setup({
+      -- Keymap to open search-replace dialog
+      -- Set to false to disable default keymap
+      keymap = "<leader>sr",
+      
+      -- Window options
+      win_options = {
+        width = 0.8,   -- 80% of editor width
+        height = 0.8,  -- 80% of editor height
+      },
+      
+      -- Additional ripgrep options
+      rg_options = {
+        -- "--hidden",      -- Search hidden files
+        -- "--no-ignore",   -- Don't respect .gitignore
+      },
+    })
+<
+
+==============================================================================
+5. Usage                                                 *search-replace-usage*
+
+1. Press `<leader>sr` to open the search-replace dialog
+2. Enter your search pattern in the Search field
+3. (Optional) Enter replacement text in the Replace field
+4. (Optional) Add file filters in the Flags/Filter field:
+   - `*.lua` - Only Lua files
+   - `src/` - Only files in src directory  
+   - `!tests/` - Exclude tests directory
+5. Press `Enter` to search
+6. Use `Space` to select/deselect files
+7. Press `r` to apply replacements
+8. Press `u` to undo the last replacement if needed
+
+==============================================================================
+6. Keybindings                                     *search-replace-keybindings*
+
+Global ~
+    <leader>sr          Open search-replace dialog
+
+Search Window:
+  <CR>      Execute search
+  <Up/Down> Navigate search history
+  <Tab>     Switch to Replace window
+
+Replace Window:
+  <CR>      Update preview / Execute search
+  <Up/Down> Navigate replace history
+  <Tab>     Switch to Flags window
+
+Flags/Filter Window:
+  <CR>      Execute search with new flags
+  <Tab>     Switch to Results window
+
+Results Window:
+  <Space>   Toggle file selection
+  r         Execute replacement (was <C-r>)
+  u         Undo last replacement
+  <CR>      Open file at match position
+  <Tab>     Switch to Preview window
+  q / <Esc> Close window files
+
+==============================================================================
+7. Health Check                                       *search-replace-health*
+
+Run `:checkhealth search-replace` to verify your setup.
+
+This will check:
+- Neovim version
+- ripgrep installation
+- Required dependencies (nui.nvim, plenary.nvim)
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:

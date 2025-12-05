@@ -1,0 +1,17 @@
+# Neovim plugin dependencies
+vendor/
+
+# Compiled Lua
+*.luac
+
+# Documentation tags
+doc/tags
+
+# macOS
+.DS_Store
+
+# Editor backups
+*~
+*.swp
+*.swo
+*.bak
