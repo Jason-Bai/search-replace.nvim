@@ -2,6 +2,14 @@
 
 A powerful search and replace plugin for Neovim using [ripgrep](https://github.com/BurntSushi/ripgrep).
 
+<p align="center">
+  <img src="assets/demo.gif" alt="search-replace.nvim demo" width="800"/>
+</p>
+
+<p align="center">
+  <em>Fast project-wide search and replace with live preview and undo support</em>
+</p>
+
 ## ✨ Features
 
 - 🔍 **Fast Search** - Powered by ripgrep for blazing fast project-wide search
@@ -24,6 +32,7 @@ A powerful search and replace plugin for Neovim using [ripgrep](https://github.c
 ### [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 **Option 1: Load on startup (simpler)**
+
 ```lua
 {
   "Jason-Bai/search-replace.nvim",
@@ -39,6 +48,7 @@ A powerful search and replace plugin for Neovim using [ripgrep](https://github.c
 ```
 
 **Option 2: Lazy load on keymap (recommended)**
+
 ```lua
 {
   "Jason-Bai/search-replace.nvim",
