@@ -23,6 +23,7 @@ A powerful search and replace plugin for Neovim using [ripgrep](https://github.c
 
 ### [lazy.nvim](https://github.com/folke/lazy.nvim)
 
+**Option 1: Load on startup (simpler)**
 ```lua
 {
   "Jason-Bai/search-replace.nvim",
@@ -30,8 +31,28 @@ A powerful search and replace plugin for Neovim using [ripgrep](https://github.c
     "MunifTanjim/nui.nvim",
     "nvim-lua/plenary.nvim",
   },
+  lazy = false,  -- Load on startup to register keymaps
   config = function()
     require("search-replace").setup()
+  end,
+}
+```
+
+**Option 2: Lazy load on keymap (recommended)**
+```lua
+{
+  "Jason-Bai/search-replace.nvim",
+  dependencies = {
+    "MunifTanjim/nui.nvim",
+    "nvim-lua/plenary.nvim",
+  },
+  keys = {
+    { "<leader>sr", "<cmd>lua require('search-replace').open()<cr>", desc = "Search and Replace" },
+  },
+  config = function()
+    require("search-replace").setup({
+      keymap = false,  -- Don't set default keymap, using lazy.nvim keys instead
+    })
   end,
 }
 ```
