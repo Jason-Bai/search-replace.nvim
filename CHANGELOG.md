@@ -7,25 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed Enter key closing the dialog in Results window
-  - Removed `<CR>` from submit keymap in Results
-  - Updated documentation to reflect correct keybindings
-
 ## [0.1.1] - 2024-12-05
 
 ### Fixed
 
 - Fixed keymap not working with lazy.nvim default configuration
-- Updated installation instructions with two options:
-  - Option 1: `lazy = false` for immediate loading
-  - Option 2: Use `keys` spec for lazy loading (recommended)
+- Fixed Enter key closing the dialog in Results window
+  - Removed `<CR>` from submit keymap in Results
+  - Updated documentation to reflect correct keybindings
 
 ### Documentation
 
 - Added detailed lazy.nvim installation examples in README
+  - Option 1: `lazy = false` for immediate loading
+  - Option 2: Use `keys` spec for lazy loading (recommended)
 - Updated Vim help documentation with both installation methods
+- Added Browse Mode design document for future v0.2.0 feature
 
 ## [0.1.0] - 2024-12-05
 
