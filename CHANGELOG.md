@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Enter key closing the dialog in Results window
+  - Removed `<CR>` from submit keymap in Results
+  - Updated documentation to reflect correct keybindings
+
 ## [0.1.1] - 2024-12-05
 
 ### Fixed

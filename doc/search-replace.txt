@@ -133,7 +133,6 @@ Results Window:
   <Space>   Toggle file selection
   r         Execute replacement (was <C-r>)
   u         Undo last replacement
-  <CR>      Open file at match position
   <Tab>     Switch to Preview window
   q / <Esc> Close window files
 
