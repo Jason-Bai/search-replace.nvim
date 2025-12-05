@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Option 2: Use `keys` spec for lazy loading (recommended)
 - Updated Vim help documentation with both installation methods
 - Added Browse Mode design document for future v0.2.0 feature
+- Added demo GIF to README showcasing main workflow
 
 ## [0.1.0] - 2024-12-05
 
