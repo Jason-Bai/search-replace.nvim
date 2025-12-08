@@ -10,6 +10,7 @@ local Diff = require("search-replace.core.diff")
 local Platform = require("search-replace.core.platform")
 local History = require("search-replace.core.history")
 local Config = require("search-replace.config")
+local Browse = require("search-replace.core.browse")
 local Popup = require("nui.popup")
 local Job = require("plenary.job")
 
@@ -122,6 +123,11 @@ function M.open()
 
   -- Helper to update preview - shows all matches for selected file
   local function update_preview()
+    -- Don't update preview if Browse Mode is active
+    if Browse.is_active() then
+      return
+    end
+
     local line_idx = vim.api.nvim_win_get_cursor(results.winid)[1]
 
     -- Get the file at this line
@@ -471,6 +477,49 @@ function M.open()
     Results.update_results(results, get_view_items())
     -- Restore cursor
     vim.api.nvim_win_set_cursor(results.winid, { line_idx, 0 })
+  end)
+
+  -- Browse mode: Open file in Preview and navigate matches with n/N
+  results:map("n", "o", function()
+    local line_idx = vim.api.nvim_win_get_cursor(results.winid)[1]
+    if line_idx > #grouped_files then
+      vim.notify("No file selected", vim.log.levels.WARN)
+      return
+    end
+
+    local file_group = grouped_files[line_idx]
+    if not file_group or not file_group.file then
+      vim.notify("No file selected", vim.log.levels.WARN)
+      return
+    end
+
+    -- Get search pattern for highlighting
+    local search_pat = ""
+    if inputs.search.bufnr then
+      local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
+      if #lines > 0 then
+        search_pat = lines[1]:gsub("^> %s*", "")
+      end
+    end
+
+    -- Enter browse mode with first match of the selected file
+    if file_group.matches and #file_group.matches > 0 then
+      Browse.enter(
+        preview,
+        results,
+        file_group.file,
+        file_group.matches[1].line_number,
+        grouped_files,
+        search_pat,
+        -- Pass focus switching functions for Tab navigation during Browse Mode
+        {
+          next = function() focus_component(inputs.search) end,  -- Tab
+          prev = function() focus_component(results) end,        -- Shift-Tab
+        }
+      )
+    else
+      vim.notify("No matches in this file", vim.log.levels.WARN)
+    end
   end)
 
   -- Backup storage for undo: { ["file_path"] = { lines = { ... } } }

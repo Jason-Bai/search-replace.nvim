@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Browse Mode (v0.2.0)** - Navigate through search matches before replacing
+  - Press `o` in Results window to enter Browse Mode
+  - Use `n`/`N` to jump between matches in current file
+  - Press `q` to exit Browse Mode and return to Results
+  - Smart focus management: automatically switches to Preview window
+  - Real-time highlighting with namespace API (no conflicts with user's `/` search)
+  - Shows match position in title bar: `Browse [3/8] - filename:42`
+
+### Fixed
+
+- Browse Mode: Added safe border buffer validation to prevent NUI errors
+- Browse Mode: Fixed "Buffer is not 'modifiable'" error when switching focus after Browse Mode
+  - `update_preview()` now checks if Browse Mode is active before updating
+  - `exit()` now restores buffer modifiable state
+  - Tab/Shift-Tab now auto-exit Browse Mode before switching focus (prevents state conflicts)
+
+### Technical
+
+- Added `lua/search-replace/core/browse.lua` module
+- Updated Results window title to include Browse Mode hint
+- Integrated Browse Mode into main plugin workflow
+- Added namespace-based highlighting for browse matches
+
 ## [0.1.1] - 2024-12-05
 
 ### Fixed

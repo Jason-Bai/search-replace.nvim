@@ -14,6 +14,7 @@ A powerful search and replace plugin for Neovim using [ripgrep](https://github.c
 
 - 🔍 **Fast Search** - Powered by ripgrep for blazing fast project-wide search
 - 👁️ **Live Preview** - See changes before applying them
+- 🔎 **Browse Mode** - Navigate through matches with `n`/`N` before replacing (NEW in v0.2.0)
 - 📁 **File Grouping** - Results grouped by file for easy navigation
 - ✅ **Selective Replace** - Choose which files to include/exclude
 - 🎯 **Glob Filtering** - Filter by file patterns (e.g., `*.lua`, `src/`, `!tests/`)
@@ -127,10 +128,22 @@ require("search-replace").setup({
 | --------- | ------------------------------------- |
 | `j` / `k` | Navigate results                      |
 | `Space`   | Toggle file selection                 |
+| `o`       | Open Browse Mode (navigate matches)   |
 | `r`       | Execute replacement on selected files |
 | `u`       | Undo last replacement                 |
 
+### In Browse Mode (NEW in v0.2.0)
+
+| Key   | Description                |
+| ----- | -------------------------- |
+| `n`   | Jump to next match         |
+| `N`   | Jump to previous match     |
+| `q`   | Exit Browse Mode           |
+| `Tab` | Return to normal navigation |
+
 ## 📖 Usage
+
+### Basic Workflow
 
 1. Press `<leader>sr` to open the search-replace dialog
 2. Enter your search pattern in the **Search** field
@@ -143,6 +156,22 @@ require("search-replace").setup({
 6. Use `Space` to select/deselect files
 7. Press `r` to apply replacements
 8. Press `u` to undo the last replacement if needed
+
+### Browse Mode (v0.2.0+)
+
+Before replacing, you can inspect each match in detail:
+
+1. After searching, navigate to any file in **Results**
+2. Press `o` to enter **Browse Mode**
+3. Use `n` / `N` to jump between matches in the file
+4. The title bar shows your position: `Browse [3/8] - filename:42`
+5. Press `q` to exit Browse Mode and return to Results
+6. Select files with `Space` and press `r` to replace
+
+**Why use Browse Mode?**
+- 👀 Review matches in their full context before replacing
+- 🎯 Quickly navigate through all occurrences with `n`/`N`
+- ✅ Make informed decisions about which files to replace
 
 ## 🔧 Health Check
 

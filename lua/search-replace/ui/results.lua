@@ -44,7 +44,7 @@ function M.create_results()
     border = {
       style = "rounded",
       text = {
-        top = " Results (Space: toggle, r: replace, u: undo) ",
+        top = " Space:toggle | o:browse | r:replace | u:undo ",
         top_align = "center",
       },
     },
