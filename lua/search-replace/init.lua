@@ -513,8 +513,12 @@ function M.open()
         search_pat,
         -- Pass focus switching functions for Tab navigation during Browse Mode
         {
-          next = function() focus_component(inputs.search) end,  -- Tab
-          prev = function() focus_component(results) end,        -- Shift-Tab
+          next = function()
+            focus_component(inputs.search)
+          end, -- Tab
+          prev = function()
+            focus_component(results)
+          end, -- Shift-Tab
         }
       )
     else

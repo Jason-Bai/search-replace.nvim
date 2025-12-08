@@ -4,15 +4,15 @@
 local M = {}
 
 -- Namespace for highlight management
-local ns_id = vim.api.nvim_create_namespace('search_replace_browse')
+local ns_id = vim.api.nvim_create_namespace("search_replace_browse")
 
 -- State (designed for future cross-file navigation in v0.3.0)
 local browse_state = {
   active = false,
-  current_file_idx = 1,    -- Current file in global list (for v0.3.0)
-  current_match_idx = 1,   -- Current match in current file
-  files_list = {},         -- { {file="path", matches={...}}, ... }
-  search_pattern = "",     -- Current search pattern
+  current_file_idx = 1, -- Current file in global list (for v0.3.0)
+  current_match_idx = 1, -- Current match in current file
+  files_list = {}, -- { {file="path", matches={...}}, ... }
+  search_pattern = "", -- Current search pattern
 
   -- Window references
   preview_win = nil,
@@ -65,17 +65,10 @@ local function highlight_current_match()
   -- Clear previous highlights
   vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
 
-  local line_idx = match.line_number - 1  -- 0-indexed
+  local line_idx = match.line_number - 1 -- 0-indexed
 
   -- Highlight the entire line with CursorLine (subtle background)
-  vim.api.nvim_buf_add_highlight(
-    bufnr,
-    ns_id,
-    'CursorLine',
-    line_idx,
-    0,
-    -1
-  )
+  vim.api.nvim_buf_add_highlight(bufnr, ns_id, "CursorLine", line_idx, 0, -1)
 
   -- Highlight the search pattern (prominent)
   -- Try to find the pattern in the line
@@ -84,19 +77,12 @@ local function highlight_current_match()
     local line_content = lines[1]
     -- Use column info from match if available
     if match.column and match.column > 0 then
-      local col_start = match.column - 1  -- 0-indexed
+      local col_start = match.column - 1 -- 0-indexed
       -- Try to calculate end position based on pattern length
       local pattern_len = #browse_state.search_pattern
       local col_end = col_start + pattern_len
 
-      vim.api.nvim_buf_add_highlight(
-        bufnr,
-        ns_id,
-        'IncSearch',
-        line_idx,
-        col_start,
-        col_end
-      )
+      vim.api.nvim_buf_add_highlight(bufnr, ns_id, "IncSearch", line_idx, col_start, col_end)
     else
       -- Fallback: try to find pattern in line
       local start_pos, end_pos = string.find(line_content, browse_state.search_pattern, 1, true)
@@ -104,9 +90,9 @@ local function highlight_current_match()
         vim.api.nvim_buf_add_highlight(
           bufnr,
           ns_id,
-          'IncSearch',
+          "IncSearch",
           line_idx,
-          start_pos - 1,  -- 0-indexed
+          start_pos - 1, -- 0-indexed
           end_pos
         )
       end
@@ -174,7 +160,7 @@ local function jump_to_match()
     vim.schedule(function()
       if vim.api.nvim_win_is_valid(winid) then
         vim.api.nvim_win_call(winid, function()
-          vim.cmd('normal! zz')
+          vim.cmd("normal! zz")
         end)
       end
     end)
@@ -237,14 +223,14 @@ function M.enter(preview_window, results_window, file_path, line_number, all_fil
   if vim.fn.filereadable(file_path) == 1 then
     -- CRITICAL: Ensure buffer is modifiable before writing
     -- (in case user didn't properly exit previous browse mode)
-    vim.api.nvim_buf_set_option(preview_window.bufnr, 'modifiable', true)
+    vim.api.nvim_buf_set_option(preview_window.bufnr, "modifiable", true)
 
     local file_lines = vim.fn.readfile(file_path)
     vim.api.nvim_buf_set_lines(preview_window.bufnr, 0, -1, false, file_lines)
 
     -- Set buffer options
-    vim.api.nvim_buf_set_option(preview_window.bufnr, 'modifiable', false)
-    vim.api.nvim_buf_set_option(preview_window.bufnr, 'buftype', 'nofile')
+    vim.api.nvim_buf_set_option(preview_window.bufnr, "modifiable", false)
+    vim.api.nvim_buf_set_option(preview_window.bufnr, "buftype", "nofile")
 
     -- Set filetype for syntax highlighting
     local ext = vim.fn.fnamemodify(file_path, ":e")
@@ -271,21 +257,21 @@ function M.enter(preview_window, results_window, file_path, line_number, all_fil
   -- Enable n/N/q navigation (buffer-local mappings)
   local map_opts = { buffer = preview_window.bufnr, noremap = true, silent = true }
 
-  vim.keymap.set('n', 'n', M.next_match, map_opts)
-  vim.keymap.set('n', 'N', M.prev_match, map_opts)
-  vim.keymap.set('n', 'q', M.exit, map_opts)
+  vim.keymap.set("n", "n", M.next_match, map_opts)
+  vim.keymap.set("n", "N", M.prev_match, map_opts)
+  vim.keymap.set("n", "q", M.exit, map_opts)
 
   -- Override Tab/Shift-Tab to auto-exit Browse Mode before switching focus
   -- This ensures clean state when user navigates away
   if focus_handlers then
-    vim.keymap.set('n', '<Tab>', function()
+    vim.keymap.set("n", "<Tab>", function()
       M.exit()
       if focus_handlers.next then
         focus_handlers.next()
       end
     end, map_opts)
 
-    vim.keymap.set('n', '<S-Tab>', function()
+    vim.keymap.set("n", "<S-Tab>", function()
       M.exit()
       if focus_handlers.prev then
         focus_handlers.prev()
@@ -294,7 +280,7 @@ function M.enter(preview_window, results_window, file_path, line_number, all_fil
   end
 
   -- Store for cleanup
-  browse_state.saved_keymaps = { 'n', 'N', 'q', '<Tab>', '<S-Tab>' }
+  browse_state.saved_keymaps = { "n", "N", "q", "<Tab>", "<S-Tab>" }
 end
 
 ---Move to next match
@@ -354,7 +340,7 @@ function M.exit()
       vim.api.nvim_buf_clear_namespace(bufnr, ns_id, 0, -1)
 
       -- Restore buffer to modifiable state for normal preview updates
-      vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
+      vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
     end
   end
 
@@ -363,7 +349,7 @@ function M.exit()
     local bufnr = browse_state.preview_win.bufnr
     if vim.api.nvim_buf_is_valid(bufnr) then
       for _, key in ipairs(browse_state.saved_keymaps) do
-        pcall(vim.keymap.del, 'n', key, { buffer = bufnr })
+        pcall(vim.keymap.del, "n", key, { buffer = bufnr })
       end
     end
   end

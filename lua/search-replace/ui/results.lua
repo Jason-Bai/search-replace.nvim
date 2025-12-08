@@ -59,7 +59,7 @@ function M.create_results()
       focus_next = { "j", "<Down>", "<Tab>" },
       focus_prev = { "k", "<Up>", "<S-Tab>" },
       close = { "<Esc>", "<C-c>" },
-      submit = { "<Space>" },  -- Only Space for submit, remove <CR>
+      submit = { "<Space>" }, -- Only Space for submit, remove <CR>
     },
     on_submit = function(item)
       -- Toggle selection or preview
