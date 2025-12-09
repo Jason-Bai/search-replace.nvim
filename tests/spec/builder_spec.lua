@@ -5,17 +5,10 @@ describe("Command Builder", function()
   it("should build basic rg command", function()
     local inputs = { search = "query" }
     local cmd = builder.build_args(inputs)
-    -- Base args: rg --json --line-number --column --no-heading --fixed-strings query
-    -- Note: builder might return just args list without 'rg' if intended for Plenary Job, 
-    -- or full command. The previous implementation returned full command.
-    -- The user guide example returned args list starting with query.
-    -- Let's stick to returning the full args list that can be passed to Job:new({ args = ... })
-    -- So it should NOT contain 'rg' if we use Job, but the previous search.lua included 'rg'.
-    -- Let's follow the user guide's example: { "foo", "--glob", "src/" }
-    -- But wait, we also need the base flags like --json.
-    -- Let's assume build_args returns ALL arguments needed for rg.
+    -- Base args: rg --json --line-number --column --no-heading query
+    -- Note: --fixed-strings is no longer included (regex mode by default)
     
-    local expected_base = { "--json", "--line-number", "--column", "--no-heading", "--fixed-strings" }
+    local expected_base = { "--json", "--line-number", "--column", "--no-heading" }
     for _, flag in ipairs(expected_base) do
       assert.is_true(vim.tbl_contains(cmd, flag))
     end

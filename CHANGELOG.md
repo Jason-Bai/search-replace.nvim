@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2024-12-09
+
 ### Added
+
+- **Visual Selection Pre-fill** - Select text in visual mode and press `<leader>sr` to auto-fill search field
+  - Automatically escapes regex special characters
+  - Auto-focuses replace field for quick workflow
+  - Configurable via `visual` config options
+- **Search Options Toggle** - Quick toggle for case sensitivity and whole word matching
+  - Press `<C-i>` in Flags field to toggle case sensitivity (shows `[Aa]` or `[aa]`)
+  - Press `<C-w>` in Flags field to toggle whole word matching (shows `[W]` or `[ ]`)
+  - Status indicators displayed in Flags title bar
+  - Integrated with ripgrep command builder
+
+## [0.2.0] - Previous Release
 
 - **Browse Mode (v0.2.0)** - Navigate through search matches before replacing
   - Press `o` in Results window to enter Browse Mode

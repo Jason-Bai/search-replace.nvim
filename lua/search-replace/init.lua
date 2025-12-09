@@ -11,10 +11,52 @@ local Platform = require("search-replace.core.platform")
 local History = require("search-replace.core.history")
 local Config = require("search-replace.config")
 local Browse = require("search-replace.core.browse")
+local SearchOptions = require("search-replace.core.search_options")
 local Popup = require("nui.popup")
 local Job = require("plenary.job")
 
 local M = {}
+
+---Get visual selection text
+---@return string|nil selected_text The selected text, or nil if multi-line or error
+function M.get_visual_selection()
+  -- Get visual selection marks
+  local start_pos = vim.fn.getpos("'<")
+  local end_pos = vim.fn.getpos("'>")
+  
+  local start_line, start_col = start_pos[2], start_pos[3]
+  local end_line, end_col = end_pos[2], end_pos[3]
+  
+  -- Only support single-line selection for now
+  if start_line ~= end_line then
+    vim.notify("Multi-line selection not supported for search", vim.log.levels.WARN)
+    return nil
+  end
+  
+  -- Get the selected text
+  local line = vim.api.nvim_buf_get_lines(0, start_line - 1, start_line, false)[1]
+  if not line then
+    return nil
+  end
+  
+  local selected = line:sub(start_col, end_col)
+  
+  -- Escape for ripgrep if configured
+  local visual_config = Config.get("visual") or {}
+  if visual_config.escape_regex ~= false then
+    return M.escape_for_rg(selected)
+  end
+  
+  return selected
+end
+
+---Escape special characters for ripgrep regex
+---@param text string Text to escape
+---@return string escaped_text
+function M.escape_for_rg(text)
+  -- Escape ripgrep regex special characters: . * + ? ^ $ { } [ ] ( ) | \
+  return text:gsub("([%.%*%+%?%^%$%{%}%[%]%(%)%|\\])", "\\%1")
+end
 
 ---Setup the plugin with user configuration
 ---@param opts? SearchReplaceConfig User configuration
@@ -23,11 +65,43 @@ function M.setup(opts)
 
   local keymap = Config.get("keymap")
   if keymap and keymap ~= false then
+    -- Normal mode keymap
     vim.keymap.set("n", keymap, M.open, { desc = "Search and Replace" })
+    
+    -- Visual mode keymap
+    vim.keymap.set("v", keymap, M.open_visual, { desc = "Search and Replace (visual)" })
   end
 end
 
-function M.open()
+---Open search-replace from visual mode with selection pre-filled
+---This function handles exiting visual mode and extracting the selection
+---Use this when setting up lazy.nvim keys for visual mode
+function M.open_visual()
+  -- Save the visual selection before exiting visual mode
+  -- We need to yank the selection first while still in visual mode
+  local saved_reg = vim.fn.getreg("v")
+  local saved_regtype = vim.fn.getregtype("v")
+  
+  -- Yank visual selection to register "v"
+  vim.cmd('normal! "vy')
+  local visual_text = vim.fn.getreg("v")
+  
+  -- Restore the register
+  vim.fn.setreg("v", saved_reg, saved_regtype)
+  
+  -- Escape regex special characters if configured
+  local visual_config = Config.get("visual") or {}
+  if visual_config.escape_regex ~= false and visual_text then
+    visual_text = M.escape_for_rg(visual_text)
+  end
+  
+  -- Open with the visual text
+  M.open({ visual = true, visual_text = visual_text })
+end
+
+function M.open(opts)
+  opts = opts or {}
+  
   -- Check if ripgrep is installed
   if vim.fn.executable("rg") ~= 1 then
     vim.notify(
@@ -39,6 +113,18 @@ function M.open()
   end
 
   State.reset() -- Reset state on open
+  
+  -- Get visual text - either passed from open_visual() or extracted here
+  local visual_text = nil
+  if opts.visual then
+    -- Prefer visual_text from opts (set by open_visual)
+    if opts.visual_text then
+      visual_text = opts.visual_text
+    else
+      -- Fallback: try to get from selection marks (legacy support)
+      visual_text = M.get_visual_selection()
+    end
+  end
 
   local inputs = Inputs.create_inputs()
   local results = Results.create_results()
@@ -77,7 +163,7 @@ function M.open()
   local placeholders = {
     { component = inputs.search, text = "Enter search pattern..." },
     { component = inputs.replace, text = "Leave empty for search only..." },
-    { component = inputs.flags, text = "*.lua, lua/, !tests/" },
+    { component = inputs.flags, text = "e.g. *.lua, src/, !tests/" },
   }
 
   -- Placeholder namespace
@@ -104,6 +190,13 @@ function M.open()
     end
   end
 
+  -- Helper function to focus a component (defined early for use in callbacks)
+  local function focus_component(component)
+    if component and component.winid and vim.api.nvim_win_is_valid(component.winid) then
+      vim.api.nvim_set_current_win(component.winid)
+    end
+  end
+
   -- Setup placeholders for all inputs
   vim.schedule(function()
     for _, p in ipairs(placeholders) do
@@ -119,7 +212,56 @@ function M.open()
         end,
       })
     end
+    
+    -- Pre-fill visual selection if available
+    if visual_text and #visual_text > 0 then
+      local visual_config = Config.get("visual") or {}
+      
+      -- Set search field content
+      vim.api.nvim_buf_set_lines(inputs.search.bufnr, 0, -1, false, { "> " .. visual_text })
+      
+      -- Move cursor to end of search field
+      if inputs.search.winid and vim.api.nvim_win_is_valid(inputs.search.winid) then
+        local line_len = #visual_text + 2
+        vim.api.nvim_win_set_cursor(inputs.search.winid, { 1, line_len })
+      end
+      
+      -- Auto-focus replace field if configured
+      if visual_config.auto_focus_replace ~= false then
+        vim.schedule(function()
+          focus_component(inputs.replace)
+        end)
+      end
+    end
   end)
+
+  -- Helper to apply replacement (uses perl for regex support with $1, $2 etc.)
+  local function apply_replacement(original_line, search_pat, replace_pat)
+    -- Escape single quotes in the line and patterns for shell
+    local escaped_line = original_line:gsub("'", "'\\''")
+    local escaped_search = search_pat:gsub("'", "'\\''")
+    local escaped_replace = replace_pat:gsub("'", "'\\''")
+    
+    -- Use perl with single quotes to preserve $1, $2 etc.
+    -- Use /gi when case-insensitive, /g when case-sensitive
+    local perl_flags = SearchOptions.is_search_case_sensitive() and "g" or "gi"
+    local cmd = string.format(
+      "echo '%s' | perl -pe 's/%s/%s/%s' 2>/dev/null",
+      escaped_line,
+      escaped_search,
+      escaped_replace,
+      perl_flags
+    )
+    
+    local result = vim.fn.system(cmd)
+    if vim.v.shell_error == 0 and result then
+      -- Remove trailing newline
+      return result:gsub("\n$", "")
+    else
+      -- Fallback: return original line with replacement hint
+      return original_line .. " → [regex error]"
+    end
+  end
 
   -- Helper to update preview - shows all matches for selected file
   local function update_preview()
@@ -190,10 +332,7 @@ function M.open()
         end
       else
         -- Show diff for replacement WITH context
-        local ok, new_line = pcall(string.gsub, original_line, search_pat, replace_pat)
-        if not ok then
-          new_line = original_line
-        end
+        local new_line = apply_replacement(original_line, search_pat, replace_pat)
 
         -- Show 3 lines before
         local start_line = math.max(1, line_num - 3)
@@ -239,6 +378,11 @@ function M.open()
       }
       local ft = ft_map[ext] or ext
       vim.bo[preview.bufnr].filetype = ft
+      
+      -- Disable conceal to show "-" and "+" literally (not as list bullets)
+      if preview.winid and vim.api.nvim_win_is_valid(preview.winid) then
+        vim.wo[preview.winid].conceallevel = 0
+      end
     end
 
     -- Apply highlights to preview lines (diff markers)
@@ -352,7 +496,116 @@ function M.open()
     end
   end
 
-  -- Event Wiring
+  -- Realtime search state
+  local realtime_config = Config.get("realtime") or {}
+  local search_timer = nil
+  local last_match_count = 0
+
+  -- Helper to update Search title with match count
+  local function update_search_title_with_count(count_or_status)
+    local case_status = SearchOptions.get_search_status_text()
+    local count_text = ""
+    
+    if count_or_status == "..." then
+      count_text = "[...]"
+    elseif type(count_or_status) == "number" and count_or_status > 0 then
+      count_text = string.format("[%d]", count_or_status)
+    end
+    
+    local title = string.format(" Search %s %s ", case_status, count_text)
+    if inputs.search.border then
+      inputs.search.border:set_text("top", title, "center")
+    end
+  end
+
+  -- Trigger realtime search with debounce
+  local function trigger_realtime_search()
+    -- Cancel previous timer
+    if search_timer then
+      vim.fn.timer_stop(search_timer)
+      search_timer = nil
+    end
+    
+    -- Get current search text
+    local search_text = ""
+    if inputs.search.bufnr then
+      local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
+      if #lines > 0 then
+        search_text = lines[1]:gsub("^> %s*", "")
+      end
+    end
+    
+    -- Check minimum characters
+    local min_chars = realtime_config.min_chars or 2
+    if #search_text < min_chars then
+      -- Clear results
+      State.set_results({})
+      grouped_files = {}
+      Results.update_results(results, {})
+      vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, {})
+      update_search_title_with_count(0)
+      last_match_count = 0
+      return
+    end
+    
+    -- Show loading indicator
+    update_search_title_with_count("...")
+    
+    -- Debounce search
+    local debounce_ms = realtime_config.debounce_ms or 300
+    search_timer = vim.fn.timer_start(debounce_ms, function()
+      vim.schedule(function()
+        run_search()
+        -- Update match count
+        last_match_count = #State.get_results()
+        update_search_title_with_count(last_match_count)
+      end)
+    end)
+  end
+
+  -- Trigger realtime preview update (for Replace field changes)
+  local function trigger_realtime_preview()
+    if last_match_count > 0 then
+      vim.schedule(function()
+        update_preview()
+      end)
+    end
+  end
+
+  -- Setup buffer change listeners for realtime search
+  if realtime_config.enabled ~= false then
+    -- Search field changes -> trigger search
+    vim.api.nvim_buf_attach(inputs.search.bufnr, false, {
+      on_lines = function()
+        vim.schedule(function()
+          trigger_realtime_search()
+        end)
+        return false  -- Keep the callback
+      end
+    })
+    
+    -- Flags field changes -> trigger search
+    vim.api.nvim_buf_attach(inputs.flags.bufnr, false, {
+      on_lines = function()
+        vim.schedule(function()
+          trigger_realtime_search()
+        end)
+        return false
+      end
+    })
+    
+    -- Replace field changes -> update preview
+    vim.api.nvim_buf_attach(inputs.replace.bufnr, false, {
+      on_lines = function()
+        vim.schedule(function()
+          trigger_realtime_preview()
+        end)
+        return false
+      end
+    })
+  end
+
+  -- Event Wiring (Enter still works for manual trigger and history)
   inputs.search:map("i", "<CR>", function()
     -- Save to history before searching
     local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
@@ -361,6 +614,8 @@ function M.open()
       History.add_search(query)
     end
     run_search()
+    last_match_count = #State.get_results()
+    update_search_title_with_count(last_match_count)
   end)
 
   -- History navigation for Search
@@ -405,15 +660,55 @@ function M.open()
     set_input_text(inputs.replace, next_val or "")
   end)
 
+  -- Helper to update Search title (uses update_search_title_with_count)
+  local function update_search_title()
+    update_search_title_with_count(last_match_count)
+  end
+
+  -- Helper to update Flags title with case sensitivity status
+  local function update_flags_title()
+    local status_text = SearchOptions.get_glob_status_text()
+    local title = string.format(" Flags %s ", status_text)
+    
+    if inputs.flags.border then
+      inputs.flags.border:set_text("top", title, "center")
+    end
+  end
+
+  -- Toggle search case sensitivity with <C-i> in Search field
+  inputs.search:map("i", "<C-i>", function()
+    SearchOptions.toggle_search_case()
+    update_search_title()
+    
+    local msg = SearchOptions.is_search_case_sensitive() and "Search: Case sensitive" or "Search: Case insensitive"
+    vim.notify(msg, vim.log.levels.INFO)
+    
+    -- Re-run search with new case setting
+    trigger_realtime_search()
+  end, { noremap = true })
+
+  -- Toggle glob case sensitivity with <C-i> in Flags field
+  inputs.flags:map("i", "<C-i>", function()
+    SearchOptions.toggle_glob_case()
+    update_flags_title()
+    
+    local msg = SearchOptions.is_glob_case_sensitive() and "Glob: Case sensitive" or "Glob: Case insensitive"
+    vim.notify(msg, vim.log.levels.INFO)
+    
+    -- Re-run search with new glob case setting
+    trigger_realtime_search()
+  end, { noremap = true })
+
+  -- Initialize titles with default state
+  vim.schedule(function()
+    update_search_title()
+    update_flags_title()
+  end)
+
   inputs.flags:map("i", "<CR>", function()
     -- Trigger search with new flags
     run_search()
   end)
-  local function focus_component(component)
-    if component and component.winid and vim.api.nvim_win_is_valid(component.winid) then
-      vim.api.nvim_set_current_win(component.winid)
-    end
-  end
 
   -- Tab navigation: Search -> Replace -> Flags -> Results -> Preview -> (back to Search)
   local map_opts = { nowait = true, noremap = true }
@@ -598,12 +893,8 @@ function M.open()
           for _, match in ipairs(file_group.matches) do
             local line_idx = match.line_number
             local original_line = file_lines[line_idx] or ""
-            local ok, new_line = pcall(string.gsub, original_line, search_pat, replace_pat)
-            if not ok then
-              -- Invalid regex pattern
-              table.insert(errors, "Invalid pattern: " .. tostring(new_line))
-              break
-            elseif new_line ~= original_line then
+            local new_line = apply_replacement(original_line, search_pat, replace_pat)
+            if new_line ~= original_line then
               file_lines[line_idx] = new_line
               modified = true
               matches_replaced = matches_replaced + 1

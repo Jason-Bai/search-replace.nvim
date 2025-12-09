@@ -59,6 +59,7 @@ A powerful search and replace plugin for Neovim using [ripgrep](https://github.c
   },
   keys = {
     { "<leader>sr", "<cmd>lua require('search-replace').open()<cr>", desc = "Search and Replace" },
+    { "<leader>sr", "<cmd>lua require('search-replace').open_visual()<cr>", mode = "v", desc = "Search and Replace (visual)" },
   },
   config = function()
     require("search-replace").setup({
@@ -109,9 +110,10 @@ require("search-replace").setup({
 
 ### Global
 
-| Key          | Description                |
-| ------------ | -------------------------- |
-| `<leader>sr` | Open search-replace dialog |
+| Key            | Description                         |
+| -------------- | ----------------------------------- |
+| `<leader>sr`   | Open search-replace dialog          |
+| `v_<leader>sr` | Open with visual selection pre-fill |
 
 ### In Dialog
 
@@ -121,6 +123,18 @@ require("search-replace").setup({
 | `Shift-Tab` | Previous field                                            |
 | `Enter`     | Execute search (in Search/Flags field)                    |
 | `Esc` / `q` | Close dialog                                              |
+
+### In Search Field
+
+| Key     | Description                            |
+| ------- | -------------------------------------- |
+| `<C-i>` | Toggle search case sensitivity (Aa/aa) |
+
+### In Flags Field
+
+| Key     | Description                          |
+| ------- | ------------------------------------ |
+| `<C-i>` | Toggle glob case sensitivity (Aa/aa) |
 
 ### In Results
 
@@ -134,11 +148,11 @@ require("search-replace").setup({
 
 ### In Browse Mode (NEW in v0.2.0)
 
-| Key   | Description                |
-| ----- | -------------------------- |
-| `n`   | Jump to next match         |
-| `N`   | Jump to previous match     |
-| `q`   | Exit Browse Mode           |
+| Key   | Description                 |
+| ----- | --------------------------- |
+| `n`   | Jump to next match          |
+| `N`   | Jump to previous match      |
+| `q`   | Exit Browse Mode            |
 | `Tab` | Return to normal navigation |
 
 ## 📖 Usage
@@ -157,6 +171,24 @@ require("search-replace").setup({
 7. Press `r` to apply replacements
 8. Press `u` to undo the last replacement if needed
 
+### Visual Selection Workflow (v0.2.1+)
+
+Quick search for selected text:
+
+1. Select text in visual mode (e.g., `viw` to select word)
+2. Press `<leader>sr` to open dialog with pre-filled search
+3. Enter replacement text in the **Replace** field
+4. Press `Enter` to search
+5. Review matches and press `r` to replace
+
+### Search Options (v0.2.1+)
+
+Toggle search behavior in the **Flags** field:
+
+- **Case Sensitivity**: Press `<C-i>` to toggle between `[Aa]` (sensitive) and `[aa]` (insensitive)
+- **Whole Word**: Press `<C-w>` to toggle between `[W]` (whole word) and `[ ]` (partial match)
+- Status indicators appear in the Flags title bar
+
 ### Browse Mode (v0.2.0+)
 
 Before replacing, you can inspect each match in detail:
@@ -169,6 +201,7 @@ Before replacing, you can inspect each match in detail:
 6. Select files with `Space` and press `r` to replace
 
 **Why use Browse Mode?**
+
 - 👀 Review matches in their full context before replacing
 - 🎯 Quickly navigate through all occurrences with `n`/`N`
 - ✅ Make informed decisions about which files to replace

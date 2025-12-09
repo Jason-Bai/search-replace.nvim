@@ -16,6 +16,7 @@ function M.setup(opts)
   vim.keymap.set("n", "<leader>sr", M.open, { desc = "Search and Replace" })
 end
 
+
 function M.open()
   State.reset() -- Reset state on open
 
@@ -316,6 +317,10 @@ function M.open()
   vim.schedule(function()
     focus_component(inputs.search)
   end)
+
+  foo(1,2);
+
+  Error
 end
 
 return M
