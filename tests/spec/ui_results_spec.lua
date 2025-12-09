@@ -15,7 +15,7 @@ describe("UI Results", function()
       { file = "file1.lua", match_count = 2, selected = true },
       { file = "file2.lua", match_count = 1, selected = false },
     }
-    
+
     -- We need to mock the tree or menu update method if we want to verify it strictly.
     -- But let's just check if we can call the update method.
     local ok, _ = pcall(ui_results.update_results, results, items)

@@ -5,8 +5,8 @@ local M = {}
 
 -- State for search options (separate for search pattern and glob filter)
 local state = {
-  search_case_sensitive = true,   -- Default: search pattern is case sensitive
-  glob_case_sensitive = true,     -- Default: glob filter is case sensitive
+  search_case_sensitive = true, -- Default: search pattern is case sensitive
+  glob_case_sensitive = true, -- Default: glob filter is case sensitive
 }
 
 ---Toggle search case sensitivity
@@ -39,11 +39,11 @@ end
 ---@return table args List of ripgrep arguments
 function M.get_rg_args()
   local args = {}
-  
+
   if not state.search_case_sensitive then
-    table.insert(args, "-i")  -- ignore case for search
+    table.insert(args, "-i") -- ignore case for search
   end
-  
+
   return args
 end
 
@@ -68,4 +68,3 @@ function M.get_glob_status_text()
 end
 
 return M
-

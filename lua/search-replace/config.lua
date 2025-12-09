@@ -49,16 +49,16 @@ M.defaults = {
 
   -- Visual selection pre-fill
   visual = {
-    enabled = true,           -- Enable visual selection pre-fill
-    escape_regex = true,      -- Auto-escape regex special characters
+    enabled = true, -- Enable visual selection pre-fill
+    escape_regex = true, -- Auto-escape regex special characters
     auto_focus_replace = true, -- Auto-focus replace field after pre-fill
   },
 
   -- Realtime search (no Enter required)
   realtime = {
-    enabled = true,           -- Enable realtime search
-    debounce_ms = 300,        -- Delay before triggering search
-    min_chars = 2,            -- Minimum characters to start searching
+    enabled = true, -- Enable realtime search
+    debounce_ms = 300, -- Delay before triggering search
+    min_chars = 2, -- Minimum characters to start searching
   },
 }
 

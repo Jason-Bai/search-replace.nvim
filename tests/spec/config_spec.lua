@@ -24,7 +24,7 @@ describe("Configuration", function()
         width = 0.6,
       },
     })
-    
+
     assert.are.same("<leader>ss", config.get("keymap"))
     assert.are.same(0.6, config.get("win_options").width)
     assert.are.same(0.8, config.get("win_options").height) -- Default preserved
@@ -37,7 +37,7 @@ describe("Configuration", function()
 
   it("should support custom rg_options", function()
     config.setup({
-      rg_options = { "--hidden", "--no-ignore" }
+      rg_options = { "--hidden", "--no-ignore" },
     })
     local rg_opts = config.get("rg_options")
     assert.are.same(2, #rg_opts)

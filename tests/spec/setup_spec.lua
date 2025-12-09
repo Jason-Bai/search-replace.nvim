@@ -16,6 +16,6 @@ describe("Search-Replace.nvim Setup", function()
     -- For now we just check if the directory is in path, which require handles.
     -- Since we haven't written init.lua yet, this might fail if we expect it to load something.
     -- But let's just check if we can require the namespace.
-    assert.is_true(true) 
+    assert.is_true(true)
   end)
 end)

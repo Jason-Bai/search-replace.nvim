@@ -37,7 +37,7 @@ describe("UI Layout", function()
       preview = Popup({}),
     }
     local layout = ui_layout.create_layout(components)
-    
+
     layout:mount()
     assert.is_true(layout._.mounted)
     layout:unmount()

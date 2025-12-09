@@ -23,30 +23,30 @@ function M.get_visual_selection()
   -- Get visual selection marks
   local start_pos = vim.fn.getpos("'<")
   local end_pos = vim.fn.getpos("'>")
-  
+
   local start_line, start_col = start_pos[2], start_pos[3]
   local end_line, end_col = end_pos[2], end_pos[3]
-  
+
   -- Only support single-line selection for now
   if start_line ~= end_line then
     vim.notify("Multi-line selection not supported for search", vim.log.levels.WARN)
     return nil
   end
-  
+
   -- Get the selected text
   local line = vim.api.nvim_buf_get_lines(0, start_line - 1, start_line, false)[1]
   if not line then
     return nil
   end
-  
+
   local selected = line:sub(start_col, end_col)
-  
+
   -- Escape for ripgrep if configured
   local visual_config = Config.get("visual") or {}
   if visual_config.escape_regex ~= false then
     return M.escape_for_rg(selected)
   end
-  
+
   return selected
 end
 
@@ -67,7 +67,7 @@ function M.setup(opts)
   if keymap and keymap ~= false then
     -- Normal mode keymap
     vim.keymap.set("n", keymap, M.open, { desc = "Search and Replace" })
-    
+
     -- Visual mode keymap
     vim.keymap.set("v", keymap, M.open_visual, { desc = "Search and Replace (visual)" })
   end
@@ -81,27 +81,27 @@ function M.open_visual()
   -- We need to yank the selection first while still in visual mode
   local saved_reg = vim.fn.getreg("v")
   local saved_regtype = vim.fn.getregtype("v")
-  
+
   -- Yank visual selection to register "v"
   vim.cmd('normal! "vy')
   local visual_text = vim.fn.getreg("v")
-  
+
   -- Restore the register
   vim.fn.setreg("v", saved_reg, saved_regtype)
-  
+
   -- Escape regex special characters if configured
   local visual_config = Config.get("visual") or {}
   if visual_config.escape_regex ~= false and visual_text then
     visual_text = M.escape_for_rg(visual_text)
   end
-  
+
   -- Open with the visual text
   M.open({ visual = true, visual_text = visual_text })
 end
 
 function M.open(opts)
   opts = opts or {}
-  
+
   -- Check if ripgrep is installed
   if vim.fn.executable("rg") ~= 1 then
     vim.notify(
@@ -113,7 +113,7 @@ function M.open(opts)
   end
 
   State.reset() -- Reset state on open
-  
+
   -- Get visual text - either passed from open_visual() or extracted here
   local visual_text = nil
   if opts.visual then
@@ -212,20 +212,20 @@ function M.open(opts)
         end,
       })
     end
-    
+
     -- Pre-fill visual selection if available
     if visual_text and #visual_text > 0 then
       local visual_config = Config.get("visual") or {}
-      
+
       -- Set search field content
       vim.api.nvim_buf_set_lines(inputs.search.bufnr, 0, -1, false, { "> " .. visual_text })
-      
+
       -- Move cursor to end of search field
       if inputs.search.winid and vim.api.nvim_win_is_valid(inputs.search.winid) then
         local line_len = #visual_text + 2
         vim.api.nvim_win_set_cursor(inputs.search.winid, { 1, line_len })
       end
-      
+
       -- Auto-focus replace field if configured
       if visual_config.auto_focus_replace ~= false then
         vim.schedule(function()
@@ -241,7 +241,7 @@ function M.open(opts)
     local escaped_line = original_line:gsub("'", "'\\''")
     local escaped_search = search_pat:gsub("'", "'\\''")
     local escaped_replace = replace_pat:gsub("'", "'\\''")
-    
+
     -- Use perl with single quotes to preserve $1, $2 etc.
     -- Use /gi when case-insensitive, /g when case-sensitive
     local perl_flags = SearchOptions.is_search_case_sensitive() and "g" or "gi"
@@ -252,7 +252,7 @@ function M.open(opts)
       escaped_replace,
       perl_flags
     )
-    
+
     local result = vim.fn.system(cmd)
     if vim.v.shell_error == 0 and result then
       -- Remove trailing newline
@@ -378,7 +378,7 @@ function M.open(opts)
       }
       local ft = ft_map[ext] or ext
       vim.bo[preview.bufnr].filetype = ft
-      
+
       -- Disable conceal to show "-" and "+" literally (not as list bullets)
       if preview.winid and vim.api.nvim_win_is_valid(preview.winid) then
         vim.wo[preview.winid].conceallevel = 0
@@ -505,13 +505,13 @@ function M.open(opts)
   local function update_search_title_with_count(count_or_status)
     local case_status = SearchOptions.get_search_status_text()
     local count_text = ""
-    
+
     if count_or_status == "..." then
       count_text = "[...]"
     elseif type(count_or_status) == "number" and count_or_status > 0 then
       count_text = string.format("[%d]", count_or_status)
     end
-    
+
     local title = string.format(" Search %s %s ", case_status, count_text)
     if inputs.search.border then
       inputs.search.border:set_text("top", title, "center")
@@ -525,7 +525,7 @@ function M.open(opts)
       vim.fn.timer_stop(search_timer)
       search_timer = nil
     end
-    
+
     -- Get current search text
     local search_text = ""
     if inputs.search.bufnr then
@@ -534,7 +534,7 @@ function M.open(opts)
         search_text = lines[1]:gsub("^> %s*", "")
       end
     end
-    
+
     -- Check minimum characters
     local min_chars = realtime_config.min_chars or 2
     if #search_text < min_chars then
@@ -547,10 +547,10 @@ function M.open(opts)
       last_match_count = 0
       return
     end
-    
+
     -- Show loading indicator
     update_search_title_with_count("...")
-    
+
     -- Debounce search
     local debounce_ms = realtime_config.debounce_ms or 300
     search_timer = vim.fn.timer_start(debounce_ms, function()
@@ -580,10 +580,10 @@ function M.open(opts)
         vim.schedule(function()
           trigger_realtime_search()
         end)
-        return false  -- Keep the callback
-      end
+        return false -- Keep the callback
+      end,
     })
-    
+
     -- Flags field changes -> trigger search
     vim.api.nvim_buf_attach(inputs.flags.bufnr, false, {
       on_lines = function()
@@ -591,9 +591,9 @@ function M.open(opts)
           trigger_realtime_search()
         end)
         return false
-      end
+      end,
     })
-    
+
     -- Replace field changes -> update preview
     vim.api.nvim_buf_attach(inputs.replace.bufnr, false, {
       on_lines = function()
@@ -601,7 +601,7 @@ function M.open(opts)
           trigger_realtime_preview()
         end)
         return false
-      end
+      end,
     })
   end
 
@@ -669,7 +669,7 @@ function M.open(opts)
   local function update_flags_title()
     local status_text = SearchOptions.get_glob_status_text()
     local title = string.format(" Flags %s ", status_text)
-    
+
     if inputs.flags.border then
       inputs.flags.border:set_text("top", title, "center")
     end
@@ -679,10 +679,10 @@ function M.open(opts)
   inputs.search:map("i", "<C-i>", function()
     SearchOptions.toggle_search_case()
     update_search_title()
-    
+
     local msg = SearchOptions.is_search_case_sensitive() and "Search: Case sensitive" or "Search: Case insensitive"
     vim.notify(msg, vim.log.levels.INFO)
-    
+
     -- Re-run search with new case setting
     trigger_realtime_search()
   end, { noremap = true })
@@ -691,10 +691,10 @@ function M.open(opts)
   inputs.flags:map("i", "<C-i>", function()
     SearchOptions.toggle_glob_case()
     update_flags_title()
-    
+
     local msg = SearchOptions.is_glob_case_sensitive() and "Glob: Case sensitive" or "Glob: Case insensitive"
     vim.notify(msg, vim.log.levels.INFO)
-    
+
     -- Re-run search with new glob case setting
     trigger_realtime_search()
   end, { noremap = true })

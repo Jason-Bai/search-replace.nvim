@@ -16,7 +16,7 @@ describe("State Management", function()
       { file = "b.lua", line_number = 2 },
     }
     state.set_results(items)
-    
+
     assert.are.same(items, state.get_results())
     assert.is_true(state.is_selected(1))
     assert.is_true(state.is_selected(2))
@@ -25,14 +25,14 @@ describe("State Management", function()
   it("should toggle selection", function()
     local items = { { file = "a.lua" } }
     state.set_results(items)
-    
+
     state.toggle_selection(1)
     assert.is_false(state.is_selected(1))
-    
+
     state.toggle_selection(1)
     assert.is_true(state.is_selected(1))
   end)
-  
+
   it("should get selected items only", function()
     local items = {
       { file = "a.lua", id = 1 },
@@ -41,7 +41,7 @@ describe("State Management", function()
     }
     state.set_results(items)
     state.toggle_selection(2) -- Deselect b.lua
-    
+
     local selected = state.get_selected_items()
     assert.are.same(2, #selected)
     assert.are.same(1, selected[1].id)

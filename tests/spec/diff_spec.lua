@@ -6,7 +6,7 @@ describe("Diff Logic", function()
     local original = "local foo = bar"
     local replacement = "local baz = bar"
     local lines = diff.generate_diff(original, replacement)
-    
+
     -- Expected:
     -- - local foo = bar
     -- + local baz = bar
@@ -19,10 +19,10 @@ describe("Diff Logic", function()
     local original = "local foo = bar"
     local replacement = ""
     local lines = diff.generate_diff(original, replacement)
-    
+
     -- Expected:
     -- - local foo = bar
-    -- + 
+    -- +
     assert.are.same(2, #lines)
     assert.is_not_nil(lines[1]:match("^-"))
     assert.is_not_nil(lines[2]:match("^+"))

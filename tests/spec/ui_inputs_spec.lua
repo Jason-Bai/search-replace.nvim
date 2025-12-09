@@ -7,7 +7,7 @@ describe("UI Inputs", function()
     assert.is_not_nil(inputs.search)
     assert.is_not_nil(inputs.replace)
     assert.is_not_nil(inputs.flags)
-    
+
     -- Check labels/borders
     -- Accessing border text is tricky in Nui, but we can check if they are Input objects
     assert.is_function(inputs.search.mount)
