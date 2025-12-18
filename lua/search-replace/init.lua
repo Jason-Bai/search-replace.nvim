@@ -1,4 +1,6 @@
 -- lua/search-replace/init.lua
+-- Main plugin entry point - orchestrates UI components and engines
+
 local Layout = require("search-replace.ui.layout")
 local Inputs = require("search-replace.ui.inputs")
 local Results = require("search-replace.ui.results")
@@ -6,14 +8,14 @@ local Builder = require("search-replace.core.builder")
 local Parser = require("search-replace.core.parser")
 local State = require("search-replace.core.state")
 local Grouper = require("search-replace.core.grouper")
-local Diff = require("search-replace.core.diff")
 local Platform = require("search-replace.core.platform")
-local History = require("search-replace.core.history")
 local Config = require("search-replace.config")
 local Browse = require("search-replace.core.browse")
 local SearchOptions = require("search-replace.core.search_options")
+local PreviewManager = require("search-replace.engine.preview_manager")
+local ReplacementEngine = require("search-replace.engine.replacement_engine")
+local EventHandlers = require("search-replace.engine.event_handlers")
 local Popup = require("nui.popup")
-local Job = require("plenary.job")
 
 local M = {}
 
@@ -99,6 +101,8 @@ function M.open_visual()
   M.open({ visual = true, visual_text = visual_text })
 end
 
+---Main open function - creates UI and wires everything together
+---@param opts? table Options { visual, visual_text }
 function M.open(opts)
   opts = opts or {}
 
@@ -126,11 +130,14 @@ function M.open(opts)
     end
   end
 
+  -- ========================================
+  -- 1. Create UI Components
+  -- ========================================
   local inputs = Inputs.create_inputs()
   local results = Results.create_results()
   local preview = Popup({
     enter = false,
-    focusable = true, -- Changed to true for Tab navigation
+    focusable = true,
     border = {
       style = "rounded",
       text = {
@@ -144,6 +151,7 @@ function M.open(opts)
   })
 
   local components = {
+    inputs = inputs,
     search = inputs.search,
     replace = inputs.replace,
     flags = inputs.flags,
@@ -154,268 +162,28 @@ function M.open(opts)
   local layout = Layout.create_layout(components)
   layout:mount()
 
-  -- Store grouped data for preview access (initialize early)
+  -- ========================================
+  -- 2. Initialize Engines
+  -- ========================================
+  local preview_mgr = PreviewManager.new(preview, inputs)
+  local replace_engine = ReplacementEngine.new()
+
+  -- ========================================
+  -- 3. State Management
+  -- ========================================
   local grouped_files = {}
-  -- Track file selection state (by file path)
   local file_selection = {}
-
-  -- Placeholder text config
-  local placeholders = {
-    { component = inputs.search, text = "Enter search pattern..." },
-    { component = inputs.replace, text = "Leave empty for search only..." },
-    { component = inputs.flags, text = "e.g. *.lua, src/, !tests/" },
-  }
-
-  -- Placeholder namespace
-  local placeholder_ns = vim.api.nvim_create_namespace("search_replace_placeholder")
-
-  -- Function to update placeholder display
-  local function update_placeholder(component, placeholder_text)
-    if not component.bufnr then
-      return
-    end
-
-    vim.api.nvim_buf_clear_namespace(component.bufnr, placeholder_ns, 0, -1)
-
-    local lines = vim.api.nvim_buf_get_lines(component.bufnr, 0, 1, false)
-    local content = lines[1] or ""
-    -- Remove prompt "> " from content check
-    content = content:gsub("^> ", "")
-
-    if content == "" then
-      vim.api.nvim_buf_set_extmark(component.bufnr, placeholder_ns, 0, 2, {
-        virt_text = { { placeholder_text, "Comment" } },
-        virt_text_pos = "overlay",
-      })
-    end
-  end
-
-  -- Helper function to focus a component (defined early for use in callbacks)
-  local function focus_component(component)
-    if component and component.winid and vim.api.nvim_win_is_valid(component.winid) then
-      vim.api.nvim_set_current_win(component.winid)
-    end
-  end
-
-  -- Setup placeholders for all inputs
-  vim.schedule(function()
-    for _, p in ipairs(placeholders) do
-      update_placeholder(p.component, p.text)
-
-      -- Update placeholder when buffer changes
-      vim.api.nvim_buf_attach(p.component.bufnr, false, {
-        on_lines = function()
-          vim.schedule(function()
-            update_placeholder(p.component, p.text)
-          end)
-          return false
-        end,
-      })
-    end
-
-    -- Pre-fill visual selection if available
-    if visual_text and #visual_text > 0 then
-      local visual_config = Config.get("visual") or {}
-
-      -- Set search field content
-      vim.api.nvim_buf_set_lines(inputs.search.bufnr, 0, -1, false, { "> " .. visual_text })
-
-      -- Move cursor to end of search field
-      if inputs.search.winid and vim.api.nvim_win_is_valid(inputs.search.winid) then
-        local line_len = #visual_text + 2
-        vim.api.nvim_win_set_cursor(inputs.search.winid, { 1, line_len })
-      end
-
-      -- Auto-focus replace field if configured
-      if visual_config.auto_focus_replace ~= false then
-        vim.schedule(function()
-          focus_component(inputs.replace)
-        end)
-      end
-    end
-  end)
-
-  -- Helper to apply replacement (uses perl for regex support with $1, $2 etc.)
-  local function apply_replacement(original_line, search_pat, replace_pat)
-    -- Escape single quotes in the line and patterns for shell
-    local escaped_line = original_line:gsub("'", "'\\''")
-    local escaped_search = search_pat:gsub("'", "'\\''")
-    local escaped_replace = replace_pat:gsub("'", "'\\''")
-
-    -- Use perl with single quotes to preserve $1, $2 etc.
-    -- Use /gi when case-insensitive, /g when case-sensitive
-    local perl_flags = SearchOptions.is_search_case_sensitive() and "g" or "gi"
-    local cmd = string.format(
-      "echo '%s' | perl -pe 's/%s/%s/%s' 2>/dev/null",
-      escaped_line,
-      escaped_search,
-      escaped_replace,
-      perl_flags
-    )
-
-    local result = vim.fn.system(cmd)
-    if vim.v.shell_error == 0 and result then
-      -- Remove trailing newline
-      return result:gsub("\n$", "")
-    else
-      -- Fallback: return original line with replacement hint
-      return original_line .. " → [regex error]"
-    end
-  end
-
-  -- Helper to update preview - shows all matches for selected file
-  local function update_preview()
-    -- Don't update preview if Browse Mode is active
-    if Browse.is_active() then
-      return
-    end
-
-    local line_idx = vim.api.nvim_win_get_cursor(results.winid)[1]
-
-    -- Get the file at this line
-    if line_idx > #grouped_files then
-      vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, {})
-      return
-    end
-
-    local file_group = grouped_files[line_idx]
-    if not file_group then
-      vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, {})
-      return
-    end
-
-    -- Get search and replace patterns
-    local search_pat = ""
-    if inputs.search.bufnr then
-      local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
-      if #lines > 0 then
-        search_pat = lines[1]:gsub("^> %s*", "")
-      end
-    end
-
-    local replace_pat = ""
-    if inputs.replace.bufnr then
-      local lines = vim.api.nvim_buf_get_lines(inputs.replace.bufnr, 0, 1, false)
-      if #lines > 0 then
-        replace_pat = lines[1]:gsub("^> %s*", "")
-      end
-    end
-
-    -- Read file content
-    local file_path = file_group.file
-    local file_lines = {}
-    if vim.fn.filereadable(file_path) == 1 then
-      file_lines = vim.fn.readfile(file_path)
-    end
-
-    local preview_lines = {}
-    table.insert(preview_lines, "File: " .. file_path)
-    table.insert(preview_lines, "Matches: " .. #file_group.matches)
-    table.insert(preview_lines, "")
-
-    -- Show all matches for this file
-    for i, match in ipairs(file_group.matches) do
-      local line_num = match.line_number
-      local original_line = file_lines[line_num] or ""
-
-      table.insert(preview_lines, "--- Match " .. i .. " @ Line " .. line_num .. " ---")
-
-      -- If no replacement pattern, just show context
-      if replace_pat == "" then
-        -- Show 3 lines of context before and after
-        local start_line = math.max(1, line_num - 3)
-        local end_line = math.min(#file_lines, line_num + 3)
-
-        for j = start_line, end_line do
-          local prefix = j == line_num and ">>> " or "    "
-          table.insert(preview_lines, prefix .. file_lines[j])
-        end
-      else
-        -- Show diff for replacement WITH context
-        local new_line = apply_replacement(original_line, search_pat, replace_pat)
-
-        -- Show 3 lines before
-        local start_line = math.max(1, line_num - 3)
-        for j = start_line, line_num - 1 do
-          table.insert(preview_lines, "  " .. file_lines[j])
-        end
-
-        -- Show diff
-        table.insert(preview_lines, "- " .. original_line)
-        table.insert(preview_lines, "+ " .. new_line)
-
-        -- Show 3 lines after
-        local end_line = math.min(#file_lines, line_num + 3)
-        for j = line_num + 1, end_line do
-          table.insert(preview_lines, "  " .. file_lines[j])
-        end
-      end
-
-      table.insert(preview_lines, "")
-    end
-
-    vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, preview_lines)
-
-    -- Set buffer filetype for syntax highlighting
-    local ext = vim.fn.fnamemodify(file_path, ":e")
-    if ext and ext ~= "" then
-      -- Map common extensions to filetypes
-      local ft_map = {
-        tsx = "typescriptreact",
-        jsx = "javascriptreact",
-        ts = "typescript",
-        js = "javascript",
-        md = "markdown",
-        yml = "yaml",
-        py = "python",
-        rb = "ruby",
-        rs = "rust",
-        go = "go",
-        c = "c",
-        cpp = "cpp",
-        h = "c",
-        hpp = "cpp",
-      }
-      local ft = ft_map[ext] or ext
-      vim.bo[preview.bufnr].filetype = ft
-
-      -- Disable conceal to show "-" and "+" literally (not as list bullets)
-      if preview.winid and vim.api.nvim_win_is_valid(preview.winid) then
-        vim.wo[preview.winid].conceallevel = 0
-      end
-    end
-
-    -- Apply highlights to preview lines (diff markers)
-    local highlights = Config.get("highlights")
-    if highlights then
-      for i, line in ipairs(preview_lines) do
-        local line_idx = i - 1 -- 0-indexed
-        if line:match("^%- ") then
-          vim.api.nvim_buf_add_highlight(preview.bufnr, -1, highlights.preview_del, line_idx, 0, -1)
-        elseif line:match("^%+ ") then
-          vim.api.nvim_buf_add_highlight(preview.bufnr, -1, highlights.preview_add, line_idx, 0, -1)
-        end
-      end
-    end
-
-    -- Reset cursor to top of preview
-    if preview.winid and vim.api.nvim_win_is_valid(preview.winid) then
-      vim.api.nvim_win_set_cursor(preview.winid, { 1, 0 })
-    end
-  end
 
   -- Helper to get view items (files only)
   local function get_view_items()
     local items = State.get_results()
-    -- Group by file
     grouped_files = Grouper.group_by_file(items)
 
     local view_items = {}
     for _, file_group in ipairs(grouped_files) do
-      -- Default to selected (true) if not explicitly set
       local is_selected = file_selection[file_group.file]
       if is_selected == nil then
-        is_selected = true -- Default: all files selected
+        is_selected = true
       end
 
       table.insert(view_items, {
@@ -427,7 +195,9 @@ function M.open(opts)
     return view_items
   end
 
-  -- Search Logic
+  -- ========================================
+  -- 4. Search Logic
+  -- ========================================
   local function run_search()
     local query = ""
     if inputs.search.bufnr then
@@ -450,8 +220,6 @@ function M.open(opts)
     end
 
     local cmd_args = Builder.build_args({ search = query, flags = flags })
-
-    -- Use cross-platform command execution
     local output, exit_code = Platform.execute(vim.fn.getcwd(), Platform.rg_executable(), cmd_args)
 
     if exit_code == 0 then
@@ -468,40 +236,26 @@ function M.open(opts)
 
       if #items > 0 then
         vim.api.nvim_win_set_cursor(results.winid, { 1, 0 })
-        update_preview()
+        preview_mgr:set_grouped_files(grouped_files)
+        preview_mgr:update_preview(results, Browse.is_active)
       else
-        -- No matches found after replace - clear preview
         vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, { "All matches replaced!" })
       end
     else
       State.set_results({})
-      grouped_files = {} -- Clear grouped files
+      grouped_files = {}
       Results.update_results(results, {})
       vim.api.nvim_buf_set_lines(preview.bufnr, 0, -1, false, { "No results found" })
     end
   end
 
-  -- Helper to set input text
-  local function set_input_text(component, text)
-    if component.bufnr then
-      vim.api.nvim_buf_set_lines(component.bufnr, 0, -1, false, { "> " .. (text or "") })
-      -- Move cursor to end
-      vim.schedule(function()
-        local win = component.winid
-        if win and vim.api.nvim_win_is_valid(win) then
-          local line = vim.api.nvim_buf_get_lines(component.bufnr, 0, 1, false)[1] or ""
-          vim.api.nvim_win_set_cursor(win, { 1, #line })
-        end
-      end)
-    end
-  end
-
-  -- Realtime search state
+  -- ========================================
+  -- 5. Realtime Search Setup
+  -- ========================================
   local realtime_config = Config.get("realtime") or {}
   local search_timer = nil
   local last_match_count = 0
 
-  -- Helper to update Search title with match count
   local function update_search_title_with_count(count_or_status)
     local case_status = SearchOptions.get_search_status_text()
     local count_text = ""
@@ -518,15 +272,12 @@ function M.open(opts)
     end
   end
 
-  -- Trigger realtime search with debounce
   local function trigger_realtime_search()
-    -- Cancel previous timer
     if search_timer then
       vim.fn.timer_stop(search_timer)
       search_timer = nil
     end
 
-    -- Get current search text
     local search_text = ""
     if inputs.search.bufnr then
       local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
@@ -535,10 +286,8 @@ function M.open(opts)
       end
     end
 
-    -- Check minimum characters
     local min_chars = realtime_config.min_chars or 2
     if #search_text < min_chars then
-      -- Clear results
       State.set_results({})
       grouped_files = {}
       Results.update_results(results, {})
@@ -548,56 +297,52 @@ function M.open(opts)
       return
     end
 
-    -- Show loading indicator
     update_search_title_with_count("...")
 
-    -- Debounce search
     local debounce_ms = realtime_config.debounce_ms or 300
     search_timer = vim.fn.timer_start(debounce_ms, function()
       vim.schedule(function()
         run_search()
-        -- Update match count
         last_match_count = #State.get_results()
         update_search_title_with_count(last_match_count)
       end)
     end)
   end
 
-  -- Trigger realtime preview update (for Replace field changes)
   local function trigger_realtime_preview()
     if last_match_count > 0 then
       vim.schedule(function()
-        update_preview()
+        preview_mgr:set_grouped_files(grouped_files)
+        preview_mgr:update_preview(results, Browse.is_active)
       end)
     end
   end
 
-  -- Setup buffer change listeners for realtime search
   if realtime_config.enabled ~= false then
-    -- Search field changes -> trigger search
     vim.api.nvim_buf_attach(inputs.search.bufnr, false, {
       on_lines = function()
         vim.schedule(function()
-          trigger_realtime_search()
-        end)
-        return false -- Keep the callback
-      end,
-    })
-
-    -- Flags field changes -> trigger search
-    vim.api.nvim_buf_attach(inputs.flags.bufnr, false, {
-      on_lines = function()
-        vim.schedule(function()
+          preview_mgr:clear_cache()  -- Clear cache when search pattern changes
           trigger_realtime_search()
         end)
         return false
       end,
     })
 
-    -- Replace field changes -> update preview
+    vim.api.nvim_buf_attach(inputs.flags.bufnr, false, {
+      on_lines = function()
+        vim.schedule(function()
+          preview_mgr:clear_cache()  -- Clear cache when flags change
+          trigger_realtime_search()
+        end)
+        return false
+      end,
+    })
+
     vim.api.nvim_buf_attach(inputs.replace.bufnr, false, {
       on_lines = function()
         vim.schedule(function()
+          preview_mgr:clear_cache()  -- Clear cache when replace pattern changes
           trigger_realtime_preview()
         end)
         return false
@@ -605,67 +350,72 @@ function M.open(opts)
     })
   end
 
-  -- Event Wiring (Enter still works for manual trigger and history)
-  inputs.search:map("i", "<CR>", function()
-    -- Save to history before searching
-    local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
-    if #lines > 0 then
-      local query = lines[1]:gsub("^> %s*", "")
-      History.add_search(query)
+  -- ========================================
+  -- 6. Placeholder Setup
+  -- ========================================
+  local placeholders = {
+    { component = inputs.search, text = "Enter search pattern..." },
+    { component = inputs.replace, text = "Leave empty for search only..." },
+    { component = inputs.flags, text = "e.g. *.lua, src/, !tests/" },
+  }
+
+  local placeholder_ns = vim.api.nvim_create_namespace("search_replace_placeholder")
+
+  local function update_placeholder(component, placeholder_text)
+    if not component.bufnr then
+      return
     end
-    run_search()
-    last_match_count = #State.get_results()
-    update_search_title_with_count(last_match_count)
-  end)
 
-  -- History navigation for Search
-  inputs.search:map("i", "<Up>", function()
-    local prev = History.prev_search()
-    if prev then
-      set_input_text(inputs.search, prev)
+    vim.api.nvim_buf_clear_namespace(component.bufnr, placeholder_ns, 0, -1)
+
+    local lines = vim.api.nvim_buf_get_lines(component.bufnr, 0, 1, false)
+    local content = lines[1] or ""
+    content = content:gsub("^> ", "")
+
+    if content == "" then
+      vim.api.nvim_buf_set_extmark(component.bufnr, placeholder_ns, 0, 2, {
+        virt_text = { { placeholder_text, "Comment" } },
+        virt_text_pos = "overlay",
+      })
     end
-  end)
-
-  inputs.search:map("i", "<Down>", function()
-    local next_val = History.next_search()
-    set_input_text(inputs.search, next_val or "")
-  end)
-
-  inputs.replace:map("i", "<CR>", function()
-    -- Save replace pattern to history
-    local lines = vim.api.nvim_buf_get_lines(inputs.replace.bufnr, 0, 1, false)
-    if #lines > 0 then
-      local pattern = lines[1]:gsub("^> %s*", "")
-      History.add_replace(pattern)
-    end
-    -- If there are results, just update preview
-    if #State.get_results() > 0 then
-      update_preview()
-    else
-      -- Otherwise trigger search
-      run_search()
-    end
-  end)
-
-  -- History navigation for Replace
-  inputs.replace:map("i", "<Up>", function()
-    local prev = History.prev_replace()
-    if prev then
-      set_input_text(inputs.replace, prev)
-    end
-  end)
-
-  inputs.replace:map("i", "<Down>", function()
-    local next_val = History.next_replace()
-    set_input_text(inputs.replace, next_val or "")
-  end)
-
-  -- Helper to update Search title (uses update_search_title_with_count)
-  local function update_search_title()
-    update_search_title_with_count(last_match_count)
   end
 
-  -- Helper to update Flags title with case sensitivity status
+  vim.schedule(function()
+    for _, p in ipairs(placeholders) do
+      update_placeholder(p.component, p.text)
+
+      vim.api.nvim_buf_attach(p.component.bufnr, false, {
+        on_lines = function()
+          vim.schedule(function()
+            update_placeholder(p.component, p.text)
+          end)
+          return false
+        end,
+      })
+    end
+
+    -- Pre-fill visual selection
+    if visual_text and #visual_text > 0 then
+      local visual_config = Config.get("visual") or {}
+
+      vim.api.nvim_buf_set_lines(inputs.search.bufnr, 0, -1, false, { "> " .. visual_text })
+
+      if inputs.search.winid and vim.api.nvim_win_is_valid(inputs.search.winid) then
+        local line_len = #visual_text + 2
+        vim.api.nvim_win_set_cursor(inputs.search.winid, { 1, line_len })
+      end
+
+      if visual_config.auto_focus_replace ~= false then
+        vim.schedule(function()
+          focus_component(inputs.replace)
+        end)
+      end
+    end
+  end)
+
+  -- ========================================
+  -- 7. Title Updates
+  -- ========================================
   local function update_flags_title()
     local status_text = SearchOptions.get_glob_status_text()
     local title = string.format(" Flags %s ", status_text)
@@ -675,307 +425,90 @@ function M.open(opts)
     end
   end
 
-  -- Toggle search case sensitivity with <C-i> in Search field
-  inputs.search:map("i", "<C-i>", function()
-    SearchOptions.toggle_search_case()
-    update_search_title()
-
-    local msg = SearchOptions.is_search_case_sensitive() and "Search: Case sensitive" or "Search: Case insensitive"
-    vim.notify(msg, vim.log.levels.INFO)
-
-    -- Re-run search with new case setting
-    trigger_realtime_search()
-  end, { noremap = true })
-
-  -- Toggle glob case sensitivity with <C-i> in Flags field
-  inputs.flags:map("i", "<C-i>", function()
-    SearchOptions.toggle_glob_case()
-    update_flags_title()
-
-    local msg = SearchOptions.is_glob_case_sensitive() and "Glob: Case sensitive" or "Glob: Case insensitive"
-    vim.notify(msg, vim.log.levels.INFO)
-
-    -- Re-run search with new glob case setting
-    trigger_realtime_search()
-  end, { noremap = true })
-
-  -- Initialize titles with default state
   vim.schedule(function()
-    update_search_title()
+    update_search_title_with_count(0)
     update_flags_title()
   end)
 
-  inputs.flags:map("i", "<CR>", function()
-    -- Trigger search with new flags
-    run_search()
-  end)
-
-  -- Tab navigation: Search -> Replace -> Flags -> Results -> Preview -> (back to Search)
-  local map_opts = { nowait = true, noremap = true }
-  inputs.search:map("i", "<Tab>", function()
-    focus_component(inputs.replace)
-  end, map_opts)
-  inputs.replace:map("i", "<Tab>", function()
-    focus_component(inputs.flags)
-  end, map_opts)
-  inputs.flags:map("i", "<Tab>", function()
-    focus_component(results)
-  end, map_opts)
-  results:map("n", "<Tab>", function()
-    focus_component(preview)
-  end, map_opts)
-  preview:map("n", "<Tab>", function()
-    focus_component(inputs.search)
-  end, map_opts)
-
-  -- Shift-Tab: Reverse navigation
-  inputs.search:map("i", "<S-Tab>", function()
-    focus_component(preview)
-  end, map_opts)
-  inputs.replace:map("i", "<S-Tab>", function()
-    focus_component(inputs.search)
-  end, map_opts)
-  inputs.flags:map("i", "<S-Tab>", function()
-    focus_component(inputs.replace)
-  end, map_opts)
-  results:map("n", "<S-Tab>", function()
-    focus_component(inputs.flags)
-  end, map_opts)
-  preview:map("n", "<S-Tab>", function()
-    focus_component(results)
-  end, map_opts)
-
-  -- Results navigation
-  results:on("CursorMoved", function()
-    update_preview()
-  end)
-
-  -- Toggle file selection with Space
-  results:map("n", "<Space>", function()
-    local line_idx = vim.api.nvim_win_get_cursor(results.winid)[1]
-    if line_idx > #grouped_files then
-      return
-    end -- Skip if empty/placeholder
-
-    local file_group = grouped_files[line_idx]
-    if not file_group then
-      return
+  -- ========================================
+  -- 8. Helper Functions for Callbacks
+  -- ========================================
+  local function focus_component(component)
+    if component and component.winid and vim.api.nvim_win_is_valid(component.winid) then
+      vim.api.nvim_set_current_win(component.winid)
     end
-
-    -- Toggle selection for this file
-    local current = file_selection[file_group.file]
-    if current == nil then
-      current = true -- Default was selected
-    end
-    file_selection[file_group.file] = not current
-
-    Results.update_results(results, get_view_items())
-    -- Restore cursor
-    vim.api.nvim_win_set_cursor(results.winid, { line_idx, 0 })
-  end)
-
-  -- Browse mode: Open file in Preview and navigate matches with n/N
-  results:map("n", "o", function()
-    local line_idx = vim.api.nvim_win_get_cursor(results.winid)[1]
-    if line_idx > #grouped_files then
-      vim.notify("No file selected", vim.log.levels.WARN)
-      return
-    end
-
-    local file_group = grouped_files[line_idx]
-    if not file_group or not file_group.file then
-      vim.notify("No file selected", vim.log.levels.WARN)
-      return
-    end
-
-    -- Get search pattern for highlighting
-    local search_pat = ""
-    if inputs.search.bufnr then
-      local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
-      if #lines > 0 then
-        search_pat = lines[1]:gsub("^> %s*", "")
-      end
-    end
-
-    -- Enter browse mode with first match of the selected file
-    if file_group.matches and #file_group.matches > 0 then
-      Browse.enter(
-        preview,
-        results,
-        file_group.file,
-        file_group.matches[1].line_number,
-        grouped_files,
-        search_pat,
-        -- Pass focus switching functions for Tab navigation during Browse Mode
-        {
-          next = function()
-            focus_component(inputs.search)
-          end, -- Tab
-          prev = function()
-            focus_component(results)
-          end, -- Shift-Tab
-        }
-      )
-    else
-      vim.notify("No matches in this file", vim.log.levels.WARN)
-    end
-  end)
-
-  -- Backup storage for undo: { ["file_path"] = { lines = { ... } } }
-  local last_backup = {}
-
-  -- Execute replacement with 'r'
-  results:map("n", "r", function()
-    -- Get search and replace patterns
-    local search_pat = ""
-    if inputs.search.bufnr then
-      local lines = vim.api.nvim_buf_get_lines(inputs.search.bufnr, 0, 1, false)
-      if #lines > 0 then
-        search_pat = lines[1]:gsub("^> %s*", "")
-      end
-    end
-
-    local replace_pat = ""
-    if inputs.replace.bufnr then
-      local lines = vim.api.nvim_buf_get_lines(inputs.replace.bufnr, 0, 1, false)
-      if #lines > 0 then
-        replace_pat = lines[1]:gsub("^> %s*", "")
-      end
-    end
-
-    if search_pat == "" then
-      vim.notify("Search pattern is empty!", vim.log.levels.WARN)
-      return
-    end
-
-    -- Count selected files and matches
-    local selected_files = {}
-    local total_matches = 0
-    for _, file_group in ipairs(grouped_files) do
-      local is_selected = file_selection[file_group.file]
-      if is_selected == nil then
-        is_selected = true
-      end
-
-      if is_selected then
-        table.insert(selected_files, file_group)
-        total_matches = total_matches + file_group.match_count
-      end
-    end
-
-    if #selected_files == 0 then
-      vim.notify("No files selected!", vim.log.levels.WARN)
-      return
-    end
-
-    -- Perform replacements
-    local files_modified = 0
-    local matches_replaced = 0
-    local errors = {}
-
-    -- Clear previous backup
-    last_backup = {}
-
-    for _, file_group in ipairs(selected_files) do
-      local file_path = file_group.file
-      if vim.fn.filereadable(file_path) == 1 then
-        -- Check if file is writable
-        if vim.fn.filewritable(file_path) ~= 1 then
-          table.insert(errors, "Permission denied: " .. file_path)
-        else
-          local file_lines = vim.fn.readfile(file_path)
-
-          -- Backup original content
-          last_backup[file_path] = vim.deepcopy(file_lines)
-
-          local modified = false
-
-          for _, match in ipairs(file_group.matches) do
-            local line_idx = match.line_number
-            local original_line = file_lines[line_idx] or ""
-            local new_line = apply_replacement(original_line, search_pat, replace_pat)
-            if new_line ~= original_line then
-              file_lines[line_idx] = new_line
-              modified = true
-              matches_replaced = matches_replaced + 1
-            end
-          end
-
-          if modified then
-            local write_ok = pcall(vim.fn.writefile, file_lines, file_path)
-            if write_ok then
-              files_modified = files_modified + 1
-            else
-              table.insert(errors, "Failed to write: " .. file_path)
-              -- Restore backup for this file if write failed
-              last_backup[file_path] = nil
-            end
-          else
-            -- No changes made, remove from backup
-            last_backup[file_path] = nil
-          end
-        end
-      else
-        table.insert(errors, "File not found: " .. file_path)
-      end
-    end
-
-    -- Show result notification
-    local msg = string.format("Replaced %d matches in %d files. Press 'u' to undo.", matches_replaced, files_modified)
-    if #errors > 0 then
-      msg = msg .. "\n\nErrors:\n" .. table.concat(errors, "\n")
-      vim.notify(msg, vim.log.levels.WARN)
-    else
-      vim.notify(msg, vim.log.levels.INFO)
-    end
-
-    -- Clear selection state and re-run search to show updated results
-    file_selection = {}
-    run_search()
-  end)
-
-  -- Implement Undo with 'u'
-  results:map("n", "u", function()
-    if vim.tbl_isempty(last_backup) then
-      vim.notify("Nothing to undo", vim.log.levels.WARN)
-      return
-    end
-
-    local restored_count = 0
-    local errors = {}
-
-    for path, lines in pairs(last_backup) do
-      if vim.fn.writefile(lines, path) == 0 then
-        restored_count = restored_count + 1
-      else
-        table.insert(errors, "Failed to restore: " .. path)
-      end
-    end
-
-    last_backup = {} -- Clear backup after undo
-
-    local msg = "Undo successful: Restored " .. restored_count .. " files"
-    if #errors > 0 then
-      msg = msg .. "\nErrors:\n" .. table.concat(errors, "\n")
-      vim.notify(msg, vim.log.levels.ERROR)
-    else
-      vim.notify(msg, vim.log.levels.INFO)
-    end
-
-    -- Refresh search results
-    run_search()
-  end)
+  end
 
   local function close()
     layout:unmount()
   end
 
-  inputs.search:map("n", "<Esc>", close)
-  inputs.search:map("i", "<Esc>", close)
-  results:map("n", "<Esc>", close)
-  results:map("n", "q", close)
+  -- ========================================
+  -- 9. Setup Event Handlers
+  -- ========================================
+  local callbacks = {
+    run_search = run_search,
+    update_preview = function()
+      preview_mgr:set_grouped_files(grouped_files)
+      preview_mgr:update_preview(results, Browse.is_active)
+    end,
+    has_results = function()
+      return #State.get_results() > 0
+    end,
+    update_search_title = function()
+      update_search_title_with_count(last_match_count)
+    end,
+    update_flags_title = update_flags_title,
+    trigger_realtime_search = trigger_realtime_search,
+    focus_component = focus_component,
+    close = close,
+    get_grouped_files = function()
+      return grouped_files
+    end,
+    toggle_file_selection = function()
+      local line_idx = vim.api.nvim_win_get_cursor(results.winid)[1]
+      if line_idx > #grouped_files then
+        return
+      end
 
-  -- Initial focus
+      local file_group = grouped_files[line_idx]
+      if not file_group then
+        return
+      end
+
+      local current = file_selection[file_group.file]
+      if current == nil then
+        current = true
+      end
+      file_selection[file_group.file] = not current
+
+      Results.update_results(results, get_view_items())
+      vim.api.nvim_win_set_cursor(results.winid, { line_idx, 0 })
+    end,
+    get_selected_files = function()
+      local selected_files = {}
+      for _, file_group in ipairs(grouped_files) do
+        local is_selected = file_selection[file_group.file]
+        if is_selected == nil then
+          is_selected = true
+        end
+
+        if is_selected then
+          table.insert(selected_files, file_group)
+        end
+      end
+      return selected_files
+    end,
+    clear_selection = function()
+      file_selection = {}
+    end,
+  }
+
+  EventHandlers.setup_all(components, preview_mgr, replace_engine, callbacks)
+
+  -- ========================================
+  -- 10. Initial Focus
+  -- ========================================
   vim.schedule(function()
     focus_component(inputs.search)
   end)

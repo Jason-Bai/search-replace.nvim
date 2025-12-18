@@ -128,13 +128,13 @@ require("search-replace").setup({
 
 | Key     | Description                            |
 | ------- | -------------------------------------- |
-| `<C-i>` | Toggle search case sensitivity (Aa/aa) |
+| `<C-t>` | Toggle search case sensitivity (Aa/aa) |
 
 ### In Flags Field
 
 | Key     | Description                          |
 | ------- | ------------------------------------ |
-| `<C-i>` | Toggle glob case sensitivity (Aa/aa) |
+| `<C-t>` | Toggle glob case sensitivity (Aa/aa) |
 
 ### In Results
 
@@ -183,11 +183,10 @@ Quick search for selected text:
 
 ### Search Options (v0.2.1+)
 
-Toggle search behavior in the **Flags** field:
+Toggle search behavior:
 
-- **Case Sensitivity**: Press `<C-i>` to toggle between `[Aa]` (sensitive) and `[aa]` (insensitive)
-- **Whole Word**: Press `<C-w>` to toggle between `[W]` (whole word) and `[ ]` (partial match)
-- Status indicators appear in the Flags title bar
+- **Case Sensitivity**: Press `<C-t>` in Search or Flags field to toggle between `[Aa]` (sensitive) and `[aa]` (insensitive)
+- Status indicators appear in the Search and Flags title bars
 
 ### Browse Mode (v0.2.0+)
 

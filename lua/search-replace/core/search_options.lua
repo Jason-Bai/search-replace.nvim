@@ -57,14 +57,14 @@ end
 ---@return string
 function M.get_search_status_text()
   local icon = state.search_case_sensitive and "Aa" or "aa"
-  return string.format("C-i:%s", icon)
+  return string.format("C-t:%s", icon)
 end
 
 ---Get formatted status string for Flags field
 ---@return string
 function M.get_glob_status_text()
   local icon = state.glob_case_sensitive and "Aa" or "aa"
-  return string.format("C-i:%s", icon)
+  return string.format("C-t:%s", icon)
 end
 
 return M
