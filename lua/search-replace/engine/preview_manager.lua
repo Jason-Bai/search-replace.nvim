@@ -23,7 +23,7 @@ function M.new(preview, inputs)
   self.preview = preview
   self.inputs = inputs
   self.grouped_files = {}
-  self.replacement_cache = {}  -- Cache for batch replacements
+  self.replacement_cache = {} -- Cache for batch replacements
   return self
 end
 
@@ -137,12 +137,7 @@ end
 ---@return table replaced_lines Array of replaced lines
 function PreviewManager:get_replaced_lines_cached(file_path, file_lines, search_pat, replace_pat)
   -- Generate cache key
-  local cache_key = string.format("%s|%s|%s|%d",
-    file_path,
-    search_pat,
-    replace_pat,
-    #file_lines
-  )
+  local cache_key = string.format("%s|%s|%s|%d", file_path, search_pat, replace_pat, #file_lines)
 
   -- Check cache
   if self.replacement_cache[cache_key] then

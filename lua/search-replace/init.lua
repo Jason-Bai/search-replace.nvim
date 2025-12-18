@@ -322,7 +322,7 @@ function M.open(opts)
     vim.api.nvim_buf_attach(inputs.search.bufnr, false, {
       on_lines = function()
         vim.schedule(function()
-          preview_mgr:clear_cache()  -- Clear cache when search pattern changes
+          preview_mgr:clear_cache() -- Clear cache when search pattern changes
           trigger_realtime_search()
         end)
         return false
@@ -332,7 +332,7 @@ function M.open(opts)
     vim.api.nvim_buf_attach(inputs.flags.bufnr, false, {
       on_lines = function()
         vim.schedule(function()
-          preview_mgr:clear_cache()  -- Clear cache when flags change
+          preview_mgr:clear_cache() -- Clear cache when flags change
           trigger_realtime_search()
         end)
         return false
@@ -342,7 +342,7 @@ function M.open(opts)
     vim.api.nvim_buf_attach(inputs.replace.bufnr, false, {
       on_lines = function()
         vim.schedule(function()
-          preview_mgr:clear_cache()  -- Clear cache when replace pattern changes
+          preview_mgr:clear_cache() -- Clear cache when replace pattern changes
           trigger_realtime_preview()
         end)
         return false
